@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: SQS for real time sentiment analysis
+
+Outputs:
+  QueueName:
+    Description: Name of SQS Queue
+    Value: !GetAtt DestQueue.QueueName
+  QueueArn:
+    Description: ARN of SQS Queue
+    Value: !GetAtt 'DestQueue.Arn'
+
+Parameters:
+  QueueName:
+    Description: The name of the SQS queue to create.
+    Type: String
+    Default: 'cf-realtime-sentiment-sqs'
+
+Resources:
+  DLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: 'cf-dlq-realtime-sentiment-sqs'
+
+  DestQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        DelaySeconds: 0
+        MaximumMessageSize: 262144
+        MessageRetentionPeriod: 1209600
+        QueueName: !Ref 'QueueName'
+        ReceiveMessageWaitTimeSeconds: 0
+        VisibilityTimeout: 30
+        RedrivePolicy:
+          deadLetterTargetArn : !GetAtt DLQ.Arn
+          maxReceiveCount : 3
+
+  PolicySQS:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Statement:
+            - Action: SQS:*
+              Effect: Allow
+              Principal: 
+                AWS:
+                  - !Ref "AWS::AccountId"
+              Resource: !GetAtt 'DestQueue.Arn'
+              Sid: Sid1517269801413
+          Version: '2012-10-17'
+        Queues:
+          - !Ref 'DestQueue'

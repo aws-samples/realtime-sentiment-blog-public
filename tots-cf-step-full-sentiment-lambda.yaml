@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Outputs:
+  LambdaFunction:
+    Value: !Ref LambdaStepFullSentiment
+  LambdaFunctionArn:
+    Value: !GetAtt LambdaStepFullSentiment.Arn
+
+Parameters:
+  TopicArn:
+    Type: String
+
+Resources:
+  IAMRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        Path: /
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/ComprehendReadOnly
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaStepFullSentiment:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import random
+          from datetime import datetime, timedelta
+          import os
+          import logging
+
+          topicArn = os.environ.get('topic_arn')
+          logger = logging.getLogger()
+          logging.getLogger().setLevel(logging.INFO)
+
+          comprehend = boto3.client('comprehend')
+
+          def lambda_handler(event, context):
+              myMessage = event["data"]
+
+              myReviewId = event["reviewId"]
+              myTimeStamp = str(datetime.now().timestamp())
+              #myTtl = datetime.now() + timedelta(days=180)
+              #myTtlEpoch = myTtl.strftime("%s")
+              logging.info("message:{}".format(myMessage))
+
+              for elem in ["review", "author", "ageGroup", "gender", "state"]:
+                if elem not in myMessage:
+                    myMessage[elem] = "N/A"
+
+              #calculate targeted sentiment
+              myComprehend = comprehend.detect_sentiment(Text=myMessage["review"],LanguageCode='en')
+              mySentiment = myComprehend['Sentiment']
+              mySentimentScore =  myComprehend['SentimentScore'][mySentiment.capitalize()]
+              mySentimentScoreStr = str(mySentimentScore)
+
+              totalReview={
+                "reviewId" : {'S' : myReviewId},
+                "sentiment" : {'S' : mySentiment},
+                "sentimentScore" : {'S' : mySentimentScoreStr},
+                "author" : {'S' : myMessage["author"]},
+                "ageGroup" : {'S' : myMessage["ageGroup"]},
+                "gender" : {'S' : myMessage["gender"]},
+                "state" : {'S' : myMessage["state"]},
+                "review" : {'S' : myMessage["review"]},
+                "timeStamp" : {'N' : myTimeStamp}
+              }
+              
+              enrichedReview = { "data": totalReview, "topicArn" : topicArn }
+              
+              response = {
+                  "statusCode": 200,
+                  "body": enrichedReview,
+                  "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                  }
+              }
+              
+              return response    
+
+      FunctionName: "cf-step-full-sentiment-lambda"
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt IAMRole.Arn
+      Tags:
+        - "Key": "Project"
+          "Value": "Realtime Sentiment Blog"
+      Environment:
+        Variables:
+          topic_arn: !Ref TopicArn
+    DependsOn:
+      - IAMRole

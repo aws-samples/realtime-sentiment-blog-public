@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Outputs:
+  LambdaFunction:
+    Value: !Ref LambdaReadSqs
+  LambdaFunctionArn:
+    Value: !GetAtt LambdaReadSqs.Arn
+
+Parameters:
+  QueueArn:
+    Type: String
+  StepFunctionArn:
+    Type: String
+  FullSentimentLambdaArn:
+    Type: String
+  TargetedSentimentLambdaArn:
+    Type: String
+
+Resources:
+  IAMRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        Path: /
+        ManagedPolicyArns:
+          - 'arn:aws:iam::aws:policy/AmazonSQSFullAccess'
+          - 'arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess'
+          - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  LambdaReadSqs:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import logging
+          import boto3
+          import os
+          import uuid
+
+          logger = logging.getLogger()
+          logging.getLogger().setLevel(logging.INFO)
+          stateMachineArn = os.environ["state_machine_arn"]
+          fullSentimentLambdaArn = os.environ["full_sentiment_lambda_arn"]
+          targetedSentimentLambdaArn = os.environ["targeted_sentiment_lambda_arn"]
+          stepFunctions = boto3.client('stepfunctions')
+
+
+          def lambda_handler(event, context):
+              record = event['Records'][0]
+              myMessage = json.loads(record['body'])
+              logging.info("Message received from queue: {}".format(myMessage))
+              myReviewId = str(uuid.uuid4())
+              jsonTotalReview = { "data": myMessage, "fullSentimentLambdaArn" : fullSentimentLambdaArn, "targetedSentimentLambdaArn" : targetedSentimentLambdaArn, "reviewId" : myReviewId}
+              jsonTotalReviewStr = json.dumps(jsonTotalReview)
+              stepFunctions.start_execution(stateMachineArn=stateMachineArn, input=jsonTotalReviewStr)    
+
+      FunctionName: "cf-read-sqs-lambda"
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt IAMRole.Arn
+      Tags:
+        - "Key": "Project"
+          "Value": "Realtime Sentiment Blog"
+      Environment:
+        Variables:
+          state_machine_arn: !Ref StepFunctionArn
+          full_sentiment_lambda_arn: !Ref FullSentimentLambdaArn
+          targeted_sentiment_lambda_arn: !Ref TargetedSentimentLambdaArn
+    DependsOn:
+      - IAMRole
+
+  LambdaFunctionEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !Ref QueueArn
+      FunctionName: !GetAtt LambdaReadSqs.Arn

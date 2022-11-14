@@ -1,0 +1,26 @@
+<html>
+<head>
+  <link rel="stylesheet" href="./style.css">
+  <link rel="icon" href="data:;base64,=">
+</head>
+<body>
+  <script src="./showtable.js" defer></script>
+
+  <ul>
+    <li><a class="active" href="#home">Create Ticket</a></li>
+    <li><a href="#view">View All</a></li>
+  </ul>
+
+  <p text-align="center;" style="font-family:Arial, Helvetica, sans-serif; font-size:24px;">CRM Ticketing System</p>
+
+  <form>
+    <label for="rid">Customer Review ID</label><br>
+    <input type="text" id="rid" name="rid" size="50">
+    <input type="button" class="button" value="Get Targeted Sentiment" onclick="fetchTargetedSentiment()" />
+  </form> 
+
+
+  <div id="list-of-entities"></div><br>
+  <div id="ticket-button"></div><br>
+</body>
+</html>

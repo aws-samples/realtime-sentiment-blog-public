@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Outputs:
+  LambdaFunction:
+    Value: !Ref LambdaStepTargetedSentiment
+  LambdaFunctionArn:
+    Value: !GetAtt LambdaStepTargetedSentiment.Arn
+
+Parameters:
+  BucketName:
+    Type: String
+  Key:
+    Type: String
+
+Resources:
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ComprehendReadOnly
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  IAMPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: cf-myComprehendDetectSentimentPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [ "comprehend:DetectTargetedSentiment" ]
+            Resource: '*'
+      Roles:
+        - !Ref IAMRole    
+
+  LambdaStepTargetedSentiment:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import subprocess
+          import logging
+          import os
+          from datetime import datetime, timedelta
+          #from os import listdir
+          #rom os.path import isfile, join
+
+          logger = logging.getLogger()
+          logging.getLogger().setLevel(logging.INFO)
+
+          def getTargetedSentiment(myMessage, myReviewId):
+              comprehend = boto3.client('comprehend')
+              dynamodb = boto3.client('dynamodb')
+              
+              myTimeStamp = str(datetime.now().timestamp())
+              #myTtl = datetime.now() + timedelta(days=180)
+              #myTtlEpoch = myTtl.strftime("%s")
+              logging.info("message:{}".format(myMessage))
+              
+              for elem in ["review", "author", "ageGroup", "gender", "state"]:
+                  if elem not in myMessage:
+                    myMessage[elem] = "N/A"
+                  
+              logging.info("Message received from queue: {}".format(myMessage))
+                  
+              #calculate targeted sentiment
+              myComprehend = comprehend.detect_targeted_sentiment(Text=myMessage["review"],LanguageCode='en')
+                  
+              myEntityId = 0
+              entities=myComprehend["Entities"]
+              allTargetedReviews = []
+              for ent in entities:
+                  myEntityId = myEntityId + 1
+                  myEntityIdStr = str(myEntityId)
+                  mentions=ent["Mentions"]
+                  for mention in mentions:
+                      myEntity=mention["Text"]
+                      myBeginOffsetStr=str(mention["BeginOffset"])
+                      myEntityType=mention["Type"]
+                      mentionSentiment=mention["MentionSentiment"]
+                      sentimentScores=mentionSentiment["SentimentScore"]
+                      mySentiment=mentionSentiment["Sentiment"]
+                      mySentimentScore=sentimentScores[mySentiment.capitalize()]
+                      mySentimentScoreStr = str(mySentimentScore)
+                      #print("{} {} {} {}".format(myEntity, myEntityType, mySentiment, mySentimentScore))
+                  
+                      targetedReview={
+                            "reviewId" : {'S' : myReviewId},
+                            "entity" : {'S' : myEntity},
+                            "entityId" : {'N' : myEntityIdStr},
+                            "entityType" : {'S' : myEntityType},
+                            "sentiment" : {'S' : mySentiment},
+                            "sentimentScore" : {'S' : mySentimentScoreStr},
+                            "beginOffset" : { 'S' : myBeginOffsetStr},
+                            "author" : {'S' : myMessage["author"]},
+                            "ageGroup" : {'S' : myMessage["ageGroup"]},
+                            "gender" : {'S' : myMessage["gender"]},
+                            "state" : {'S' : myMessage["state"]},
+                            "review" : {'S' : myMessage["review"]},
+                            "timeStamp" : {'N' : myTimeStamp}
+                        }
+
+                      allTargetedReviews.append(targetedReview)
+                        
+              print("myComprehend:{}".format(myComprehend))          
+              
+              return allTargetedReviews
+                  
+          def lambda_handler(event, context):
+              #envroot = os.environ['LAMBDA_TASK_ROOT']
+              #aws_data_path = set(os.environ.get('AWS_DATA_PATH', '').split(os.pathsep))
+              #aws_data_path.add(envroot)
+              #os.environ.update({'AWS_DATA_PATH': os.pathsep.join(aws_data_path)})
+
+              myMessage = event["data"]
+              myReviewId = event["reviewId"]
+            
+              logging.info("Message received from queue: {}".format(myMessage))
+              allReviews = getTargetedSentiment(myMessage, myReviewId)
+              
+              response = {
+                  "statusCode": 200,
+                  "body": allReviews,
+                  "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                  }
+              }
+
+              return response    
+
+      FunctionName: "cf-step-targeted-sentiment-lambda"
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt IAMRole.Arn
+      Tags:
+        - "Key": "Project"
+          "Value": "Realtime Sentiment Blog"
+      Layers:
+        - !Ref Libs
+    DependsOn:
+      - IAMRole
+
+  Libs:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: boto3-targeted-sentiment-layer
+      Description: For boto3 comprehend targeted sentiment api
+      Content:
+        S3Bucket: !Ref BucketName
+        S3Key: !Ref Key
+      CompatibleRuntimes:
+        -  python3.8 

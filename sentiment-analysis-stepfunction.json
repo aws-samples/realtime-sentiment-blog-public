@@ -1,0 +1,178 @@
+{
+  "StartAt": "Full - Targeted",
+  "States": {
+    "Full - Targeted": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Full Sentiment",
+          "States": {
+            "Full Sentiment": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName.$": "$.fullSentimentLambdaArn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "Parallel"
+            },
+            "Parallel": {
+              "Type": "Parallel",
+              "Branches": [
+                {
+                  "StartAt": "DynamoDB PutItem",
+                  "States": {
+                    "DynamoDB PutItem": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::dynamodb:putItem",
+                      "Parameters": {
+                        "TableName": "cf-full-sentiment",
+                        "Item.$": "$.body.data"
+                      },
+                      "End": true
+                    }
+                  }
+                },
+                {
+                  "StartAt": "Choice",
+                  "States": {
+                    "Choice": {
+                      "Type": "Choice",
+                      "Choices": [
+                        {
+                          "Or": [
+                            {
+                              "Variable": "$.body.data.sentiment.S",
+                              "StringMatches": "NEGATIVE"
+                            },
+                            {
+                              "Variable": "$.body.data.sentiment.S",
+                              "StringMatches": "MIXED"
+                            }
+                          ],
+                          "Next": "Notification"
+                        }
+                      ],
+                      "Default": "Pass"
+                    },
+                    "Notification": {
+                      "Type": "Parallel",
+                      "Branches": [
+                        {
+                          "StartAt": "SNS Publish",
+                          "States": {
+                            "SNS Publish": {
+                              "Type": "Task",
+                              "Resource": "arn:aws:states:::sns:publish",
+                              "Parameters": {
+                                "Message.$": "$",
+                                "TopicArn.$": "$.body.topicArn"
+                              },
+                              "End": true
+                            }
+                          }
+                        },
+                        {
+                          "StartAt": "Send to EventBridge",
+                          "States": {
+                            "Send to EventBridge": {
+                              "Type": "Task",
+                              "Resource": "arn:aws:states:::events:putEvents",
+                              "Parameters": {
+                                "Entries": [
+                                  {
+                                    "Detail": {
+                                      "Message": "Send to downstream systems",
+                                      "TaskToken.$": "$.body.data"
+                                    },
+                                    "DetailType": "downsream-event",
+                                    "EventBusName": "default",
+                                    "Source": "total-sentiment-step-function"
+                                  }
+                                ]
+                              },
+                              "End": true
+                            }
+                          }
+                        }
+                      ],
+                      "End": true
+                    },
+                    "Pass": {
+                      "Type": "Pass",
+                      "End": true
+                    }
+                  }
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Targeted Sentiment",
+          "States": {
+            "Targeted Sentiment": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName.$": "$.targetedSentimentLambdaArn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "Map"
+            },
+            "Map": {
+              "Type": "Map",
+              "InputPath": "$",
+              "ItemsPath": "$.body",
+              "MaxConcurrency": 0,
+              "Iterator": {
+                "StartAt": "DynamoDB PutItem Map",
+                "States": {
+                  "DynamoDB PutItem Map": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::dynamodb:putItem",
+                    "Parameters": {
+                      "TableName": "cf-targeted-sentiment",
+                      "Item.$": "$"
+                    },
+                    "End": true
+                  }
+                }
+              },
+              "ResultPath": "$.body",
+              "End": true            
+            }
+          }
+        }
+      ],
+      "End": true
+    }
+  }
+}

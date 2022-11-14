@@ -1,0 +1,76 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Outputs:
+  TargetedDynamoDBTable:
+    Value: !Ref TargetedDynamoDBTable
+  TargetedDynamoDBTableArn:
+    Value: !GetAtt TargetedDynamoDBTable.Arn
+  FullDynamoDBTable:
+    Value: !Ref FullDynamoDBTable
+  FullDynamoDBTableArn:
+    Value: !GetAtt FullDynamoDBTable.Arn
+
+Parameters:
+  FullSentimentDataStreamArn:
+    Type: String
+    Description: Arn of kinesis data stream for full sentiment
+  TargetedSentimentDataStreamArn:
+    Type: String
+    Description: Arn of kinesis data stream for targeted sentiment
+
+Resources:
+  TargetedDynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: "cf-targeted-sentiment"
+      AttributeDefinitions:
+        -
+          AttributeName: "reviewId"
+          AttributeType: "S"
+        -
+          AttributeName: "entity"
+          AttributeType: "S"      
+      KeySchema:
+        -
+          AttributeName: "reviewId"
+          KeyType: "HASH"
+        -
+          AttributeName: "entity"
+          KeyType: "RANGE"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      KinesisStreamSpecification:
+        StreamArn: !Ref TargetedSentimentDataStreamArn
+      Tags:
+        -
+          Key: "Project"
+          Value: "Realtime Sentiment Blog"
+
+  FullDynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: "cf-full-sentiment"
+      AttributeDefinitions:
+        -
+          AttributeName: "reviewId"
+          AttributeType: "S"
+        -
+          AttributeName: "author"
+          AttributeType: "S"      
+      KeySchema:
+        -
+          AttributeName: "reviewId"
+          KeyType: "HASH"
+        -
+          AttributeName: "author"
+          KeyType: "RANGE"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      KinesisStreamSpecification:
+        StreamArn: !Ref FullSentimentDataStreamArn
+      Tags:
+        -
+          Key: "Project"
+          Value: "Realtime Sentiment Blog"

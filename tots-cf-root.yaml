@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  Email:
+    Type: String
+    Description: Email address for SNS Notification
+  CodeBucket:
+    Type: String
+    Description: Bucket containing Code for Step and Lambda Functions
+  Suffix:
+    Type: String
+    Description: A unique suffix for your S3 buckets
+  
+Resources:
+  Kinesis:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-kinesis.yaml
+      Parameters:
+        Suffix: !Ref Suffix
+
+  DynamoDBTables:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-dynamodb.yaml
+      Parameters:
+        FullSentimentDataStreamArn: !GetAtt Kinesis.Outputs.FullSentimentDataStreamArn
+        TargetedSentimentDataStreamArn: !GetAtt Kinesis.Outputs.TargetedSentimentDataStreamArn
+    DependsOn: Kinesis
+
+  SNS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-sns.yaml
+      Parameters:
+        Email: !Ref Email
+
+  FullSentimentLambda:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-step-full-sentiment-lambda.yaml
+      Parameters:
+        TopicArn: !GetAtt SNS.Outputs.TopicArn
+
+  TargetedSentimentLambda:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-step-targ-sentiment-lambda.yaml
+      Parameters:
+        BucketName: !Ref CodeBucket
+        Key: 'boto3-layer-targeted-sentiment.zip'
+
+  ReadFromDynamoDBLambda:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-read-from-dynamodb-lambda.yaml
+      Parameters:
+        TargetedDynamoDBTable: !GetAtt DynamoDBTables.Outputs.TargetedDynamoDBTable
+    DependsOn: DynamoDBTables
+
+  StepFunction:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-stepfunction.yaml
+      Parameters:
+        TopicArn: !GetAtt SNS.Outputs.TopicArn
+        BucketName: !Ref CodeBucket
+
+  SQS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-sqs.yaml
+
+  ReadSQSLambda:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-read-sqs-lambda.yaml
+      Parameters:
+        QueueArn: !GetAtt SQS.Outputs.QueueArn
+        StepFunctionArn: !GetAtt StepFunction.Outputs.StepFunctionArn
+        FullSentimentLambdaArn: !GetAtt FullSentimentLambda.Outputs.LambdaFunctionArn
+        TargetedSentimentLambdaArn: !GetAtt TargetedSentimentLambda.Outputs.LambdaFunctionArn
+
+  APIGateway:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-api.yaml
+      Parameters:
+        QueueName: !GetAtt SQS.Outputs.QueueName
+        QueueArn: !GetAtt SQS.Outputs.QueueArn
+        LambdaFetchFromDynamoDBArn: !GetAtt ReadFromDynamoDBLambda.Outputs.LambdaFunctionArn
+    DependsOn: ReadFromDynamoDBLambda 
+  
+  StaticWebsite:
+      Type: AWS::CloudFormation::Stack
+      Properties:
+        TemplateURL: tots-static-website.yaml
+        Parameters:
+          Suffix: !Ref Suffix
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: tots-cf-cloudfront.yaml
+      Parameters:
+        MyBucket: !GetAtt StaticWebsite.Outputs.S3Bucket
+        MyDomainName: !GetAtt StaticWebsite.Outputs.DomainName
+    DependsOn: StaticWebsite
+

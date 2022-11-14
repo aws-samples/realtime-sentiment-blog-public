@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Outputs:
+  LambdaFunction:
+    Value: !Ref LambdaReadFromDynamoDB
+  LambdaFunctionArn:
+    Value: !GetAtt LambdaReadFromDynamoDB.Arn
+
+Parameters:
+  TargetedDynamoDBTable:
+    Type: String
+
+Resources:
+  IAMRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        Path: /
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaReadFromDynamoDB:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+
+          def lambda_handler(event, context):
+              dynamodb = boto3.client("dynamodb")
+              tableName = os.environ["table_name"]
+              reviewId = event["reviewId"]
+              print("reviewId:{}".format(reviewId))
+              print("tableName:{}".format(tableName))
+              
+              data = dynamodb.query(
+                  ExpressionAttributeValues={
+                      ':reviewId': {
+                          'S': reviewId,
+                      },
+                  },
+                  KeyConditionExpression='reviewId = :reviewId',
+                  TableName=tableName,
+              )    
+              
+              response = {
+                    'statusCode': 200,
+                    'body': data,
+                    'headers': {
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Headers': 'Content-Type',
+                      'Access-Control-Allow-Origin': '*',
+                      'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
+                    },
+                }
+                
+              return response
+
+      FunctionName: "cf-read-from-dynamodb-lambda"
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt IAMRole.Arn
+      Tags:
+        - "Key": "Project"
+          "Value": "Realtime Sentiment Blog"
+      Environment:
+        Variables:
+          table_name: !Ref TargetedDynamoDBTable
+    DependsOn:
+      - IAMRole

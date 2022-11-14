@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to Create an SNS Topic and Subscriptions
+
+Parameters:
+
+  Email:
+    Type: String
+    Description: Email address
+
+Resources:
+
+  SNSTopic: 
+    Type: AWS::SNS::Topic
+    Properties: 
+      Subscription: 
+        - Endpoint: !Ref Email
+          Protocol: "email"
+      TopicName: 'cf-negative-sentiment-topic'
+      Tags:
+        -
+          Key: "Project"
+          Value: "Realtime Sentiment Blog"
+ 
+          
+Outputs: 
+  TopicArn: 
+    Description: Arn of Created SNS Topic
+    Value: !Ref SNSTopic

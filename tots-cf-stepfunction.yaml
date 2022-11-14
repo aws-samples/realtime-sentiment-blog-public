@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Sentiment Analysis Step Functions state machine.
+
+Outputs:
+  StepFunctionArn: 
+    Description: ARN of StepFunction
+    Value: !GetAtt MyStateMachine.Arn
+
+Parameters:
+  TopicArn:
+    Type: String
+  BucketName:
+    Type: String
+
+Resources:
+
+  IAMRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - states.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        Path: /
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+          - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+          - arn:aws:iam::aws:policy/AmazonEventBridgeFullAccess
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+
+  MyStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: cf-sentiment-analysis-stepfunction
+      DefinitionS3Location:
+        Bucket: !Ref BucketName
+        Key: sentiment-analysis-stepfunction.json  
+      RoleArn: !GetAtt IAMRole.Arn
+      Tags:
+        -
+          Key: "Project"
+          Value: "Realtime Sentiment Blog"
+    DependsOn:
+        - IAMRole
